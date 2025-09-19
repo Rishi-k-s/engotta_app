@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'services/places_service.dart';
+import 'services/location_service.dart';
 import 'models/place_prediction.dart';
 
 void main() {
@@ -31,23 +32,43 @@ class MapSample extends StatefulWidget {
 
 class _MapSampleState extends State<MapSample> {
   late GoogleMapController mapController;
-  final LatLng _center = const LatLng(-33.86, 151.20);
+  late LatLng _center;
   final TextEditingController _fromController = TextEditingController();
   final TextEditingController _toController = TextEditingController();
 
   final PlacesService _placesService = PlacesService();
+  final LocationService _locationService = LocationService();
 
   Future<Iterable<PlacePrediction>> _getLocationSuggestions(String query) async {
     if (query.isEmpty) {
       return const Iterable<PlacePrediction>.empty();
     }
     try {
-      final predictions = await _placesService.getPlacePredictions(query);
+      final predictions = await _placesService.getPlacePredictions(
+        query,
+        latitude: _center.latitude,
+        longitude: _center.longitude,
+      );
       return predictions;
     } catch (e) {
       print('Error getting predictions: $e');
       return const Iterable<PlacePrediction>.empty();
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _center = LocationService.defaultLocation;
+    _initializeLocation();
+  }
+
+  Future<void> _initializeLocation() async {
+    final location = await _locationService.getCurrentLocation();
+    setState(() {
+      _center = location;
+    });
+    mapController.animateCamera(CameraUpdate.newLatLng(_center));
   }
 
   @override
