@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'services/places_service.dart';
 import 'services/location_service.dart';
 import 'models/place_prediction.dart';
+import 'utils/debouncer.dart';
 
 void main() {
   runApp(const MyApp());
@@ -38,22 +40,35 @@ class _MapSampleState extends State<MapSample> {
 
   final PlacesService _placesService = PlacesService();
   final LocationService _locationService = LocationService();
+  final Debouncer _searchDebouncer = Debouncer();
 
   Future<Iterable<PlacePrediction>> _getLocationSuggestions(String query) async {
-    if (query.isEmpty) {
+    // Return empty list if query is empty or less than 3 characters
+    if (query.isEmpty || query.length < 3) {
       return const Iterable<PlacePrediction>.empty();
     }
-    try {
-      final predictions = await _placesService.getPlacePredictions(
-        query,
-        latitude: _center.latitude,
-        longitude: _center.longitude,
-      );
-      return predictions;
-    } catch (e) {
-      print('Error getting predictions: $e');
-      return const Iterable<PlacePrediction>.empty();
-    }
+
+    Completer<Iterable<PlacePrediction>> completer = Completer();
+
+    _searchDebouncer.call(() async {
+      try {
+        final predictions = await _placesService.getPlacePredictions(
+          query,
+          latitude: _center.latitude,
+          longitude: _center.longitude,
+        );
+        if (!completer.isCompleted) {
+          completer.complete(predictions);
+        }
+      } catch (e) {
+        print('Error getting predictions: $e');
+        if (!completer.isCompleted) {
+          completer.complete(const Iterable<PlacePrediction>.empty());
+        }
+      }
+    });
+
+    return completer.future;
   }
 
   @override
@@ -75,6 +90,7 @@ class _MapSampleState extends State<MapSample> {
   void dispose() {
     _fromController.dispose();
     _toController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
