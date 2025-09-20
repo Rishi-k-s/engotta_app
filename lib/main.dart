@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'services/places_service.dart';
 import 'services/location_service.dart';
+import 'services/location_cache_service.dart';
 import 'models/place_prediction.dart';
 import 'utils/debouncer.dart';
 
@@ -41,12 +42,35 @@ class _MapSampleState extends State<MapSample> {
   final PlacesService _placesService = PlacesService();
   final LocationService _locationService = LocationService();
   final Debouncer _searchDebouncer = Debouncer();
+  late LocationCacheService _locationCacheService;
 
   Future<Iterable<PlacePrediction>> _getLocationSuggestions(String query) async {
-    // Return empty list if query is empty or less than 3 characters
-    if (query.isEmpty || query.length < 3) {
+    final normalizedQuery = query.toLowerCase();
+    
+    // Handle empty query - show current location and recent locations
+    if (query.isEmpty) {
+      final recentLocations = await _locationCacheService.getCachedLocations();
+      return [
+        PlacePrediction.currentLocation(),
+        ...recentLocations,
+      ];
+    }
+
+    // Show current location if query matches
+    if ('current location'.contains(normalizedQuery)) {
+      return [PlacePrediction.currentLocation()];
+    }
+
+    // For other queries, require minimum 3 characters
+    if (query.length < 3) {
       return const Iterable<PlacePrediction>.empty();
     }
+
+    // Check if query matches any recent locations
+    final recentLocations = await _locationCacheService.getCachedLocations();
+    final matchingRecent = recentLocations.where((location) =>
+        location.mainText.toLowerCase().contains(normalizedQuery) ||
+        location.secondaryText.toLowerCase().contains(normalizedQuery));
 
     Completer<Iterable<PlacePrediction>> completer = Completer();
 
@@ -58,12 +82,22 @@ class _MapSampleState extends State<MapSample> {
           longitude: _center.longitude,
         );
         if (!completer.isCompleted) {
-          completer.complete(predictions);
+          final results = [
+            if ('current location'.contains(normalizedQuery)) 
+              PlacePrediction.currentLocation(),
+            ...matchingRecent,
+            ...predictions.where((p) => !matchingRecent.any((r) => r.placeId == p.placeId))
+          ];
+          completer.complete(results);
         }
       } catch (e) {
         print('Error getting predictions: $e');
         if (!completer.isCompleted) {
-          completer.complete(const Iterable<PlacePrediction>.empty());
+          if (matchingRecent.isNotEmpty) {
+            completer.complete(matchingRecent);
+          } else {
+            completer.complete(const Iterable<PlacePrediction>.empty());
+          }
         }
       }
     });
@@ -75,7 +109,12 @@ class _MapSampleState extends State<MapSample> {
   void initState() {
     super.initState();
     _center = LocationService.defaultLocation;
-    _initializeLocation();
+    _initializeServices();
+  }
+
+  Future<void> _initializeServices() async {
+    _locationCacheService = await LocationCacheService.create();
+    await _initializeLocation();
   }
 
   Future<void> _initializeLocation() async {
@@ -110,9 +149,20 @@ class _MapSampleState extends State<MapSample> {
               optionsBuilder: (TextEditingValue textEditingValue) async {
                 return await _getLocationSuggestions(textEditingValue.text);
               },
-              onSelected: (PlacePrediction selection) {
-                _fromController.text = selection.mainText;
-                // Here you would typically update the map position
+              onSelected: (PlacePrediction selection) async {
+                if (selection.isCurrentLocation) {
+                  final currentLocation = await _locationService.getCurrentLocation();
+                  setState(() {
+                    _center = currentLocation;
+                  });
+                  mapController.animateCamera(CameraUpdate.newLatLng(_center));
+                  _fromController.text = 'Current Location';
+                } else {
+                  _fromController.text = selection.mainText;
+                  // Cache the selected location
+                  await _locationCacheService.addToCache(selection);
+                  // Here you would typically update the map position
+                }
               },
               displayStringForOption: (PlacePrediction option) => 
                 '${option.mainText}, ${option.secondaryText}',

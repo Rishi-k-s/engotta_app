@@ -3,13 +3,25 @@ class PlacePrediction {
   final String mainText;
   final String secondaryText;
   final List<String> types;
+  final bool isCurrentLocation;
 
   PlacePrediction({
     required this.placeId,
     required this.mainText,
     required this.secondaryText,
     required this.types,
+    this.isCurrentLocation = false,
   });
+
+  factory PlacePrediction.currentLocation() {
+    return PlacePrediction(
+      placeId: 'current_location',
+      mainText: '📍 Current Location',
+      secondaryText: 'Use my current location',
+      types: ['current_location'],
+      isCurrentLocation: true,
+    );
+  }
 
   factory PlacePrediction.fromJson(Map<String, dynamic> json) {
     final prediction = json['placePrediction'];
